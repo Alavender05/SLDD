@@ -12,7 +12,31 @@ def get_value(wb, sheet_name, cell_ref):
     """Helper to get a value safely."""
     if sheet_name in wb.sheetnames:
         return wb[sheet_name][cell_ref].value
-    return "SHEET NOT FOUND"
+    return None
+
+def clean_val(val):
+    """Converts Excel value to float, handling None and strings."""
+    if val is None:
+        return 0.0
+    if isinstance(val, (int, float)):
+        return float(val)
+    try:
+        # Remove common currency/percentage symbols
+        clean_str = str(val).replace('$', '').replace(',', '').replace('%', '').strip()
+        return float(clean_str)
+    except ValueError:
+        return 0.0
+
+def calc_growth(current, previous):
+    """Calculates percentage growth between two values."""
+    prev_float = clean_val(previous)
+    curr_float = clean_val(current)
+    
+    if prev_float == 0:
+        return "N/A" # Avoid division by zero
+    
+    growth = (curr_float - prev_float) / prev_float
+    return f"{growth:.2%}"
 
 def get_midpoint(label):
     """Calculates the numerical midpoint of a range string."""
@@ -25,7 +49,7 @@ def get_midpoint(label):
     elif "or more" in clean:
         try:
             lower = float(clean.replace(' or more', ''))
-            return lower * 1.1  # Estimate upper bound
+            return lower * 1.1 
         except ValueError:
             return 0
     elif "-" in clean:
@@ -39,15 +63,12 @@ def get_midpoint(label):
 def calculate_rent_stress_stats(raw_data_rows, income_labels, rent_labels):
     """Performs the matrix math: Proportions -> Weighted Percentiles."""
     try:
-        # Create DataFrame from the raw counts
         df_counts = pd.DataFrame(raw_data_rows, index=income_labels, columns=rent_labels)
         df_counts = df_counts.apply(pd.to_numeric, errors='coerce').fillna(0)
 
-        # Midpoint Estimates
         income_mids = [get_midpoint(l) for l in income_labels]
         rent_mids = [get_midpoint(l) for l in rent_labels]
 
-        # Proportion Matrix (Rent as % of Income)
         proportion_matrix = np.zeros(df_counts.shape)
         for r in range(len(income_labels)):
             for c in range(len(rent_labels)):
@@ -60,7 +81,6 @@ def calculate_rent_stress_stats(raw_data_rows, income_labels, rent_labels):
 
         df_proportions = pd.DataFrame(proportion_matrix, index=income_labels, columns=rent_labels)
 
-        # Weighted Percentiles Table
         percentiles_data = []
         for c, col_name in enumerate(rent_labels):
             counts = df_counts.iloc[:, c].values
@@ -86,7 +106,6 @@ def calculate_rent_stress_stats(raw_data_rows, income_labels, rent_labels):
             percentiles_data, 
             columns=['Rent Range', '25th Percentile', 'Median', '75th Percentile']
         )
-        
         return df_proportions, df_percentiles
 
     except Exception as e:
@@ -98,7 +117,6 @@ def calculate_rent_stress_stats(raw_data_rows, income_labels, rent_labels):
 # ==========================================
 
 def export_data_to_csv():
-    # Setup file paths
     script_dir = os.path.dirname(os.path.abspath(__file__))
     excel_filename = 'TSP_305041135.xlsx'
     csv_filename = 'extracted_data.csv'
@@ -116,140 +134,91 @@ def export_data_to_csv():
             writer = csv.writer(f)
 
             # ---------------------------------------------------------
-            # SECTION 1: T02 MATRIX (A12:I21)
+            # SECTION 1: T02 MATRIX
             # ---------------------------------------------------------
             if 'T02' in wb.sheetnames:
                 writer.writerow(["--- DATA FROM T02 (Matrix A12:I21) ---"])
                 sheet = wb['T02']
                 for row in sheet.iter_rows(min_row=12, max_row=21, min_col=1, max_col=9, values_only=True):
-                    clean_row = ["" if cell is None else cell for cell in row]
-                    writer.writerow(clean_row)
+                    writer.writerow(["" if cell is None else cell for cell in row])
                 writer.writerow([]) 
+
+            # ---------------------------------------------------------
+            # SECTION 2: TIME SERIES PANELS (Divorced, Tenure, Labour)
+            # ---------------------------------------------------------
+            writer.writerow(["--- Time Series Analysis (Growth Rates) ---"])
             
-            # ---------------------------------------------------------
-            # SECTION 2: TOTAL PERSONS DIVORCED
-            # ---------------------------------------------------------
-            writer.writerow(["--- Total Persons Divorced ---"])
-            writer.writerow(["Year", "Value"])
+            # UPDATED HEADER: Added "Total Growth '11-'21"
+            writer.writerow(["Metric", "2011 Value", "2016 Value", "2021 Value", "Growth '11-'16", "Growth '16-'21", "Total Growth '11-'21"])
 
-            divorced_data = [
-                ("2011", "T04", "L28"),
-                ("2016", "T04", "L48"),
-                ("2021", "T04", "L68"),
-            ]
-
-            for label, sheet, cell in divorced_data:
-                val = get_value(wb, sheet, cell)
-                writer.writerow([label, val])
-            writer.writerow([]) 
-
-            # ---------------------------------------------------------
-            # SECTION 3: TENURE TYPES
-            # ---------------------------------------------------------
-            writer.writerow(["--- Tenure Types ---"])
-            writer.writerow(["Description", "Value (Persons)"])
-
-            tenure_data = [
-                # 2011
-                ("2011 Separate House",        "T14a", "J13"),
-                ("2011 Flat or Apartment",     "T14a", "J26"),
-                ("2011 Owned Outright",        "T18",  "G15"),
-                ("2011 Owned with a mortgage", "T18",  "G16"),
-                ("2011 Rented",                "T18",  "G25"),
+            time_series_items = [
+                # Divorced
+                ("Total Persons Divorced",       ('T04', 'L28'),  ('T04', 'L48'),  ('T04', 'L68')),
                 
-                # 2016
-                ("2016 Separate House",        "T14b", "J13"),
-                ("2016 Flat or Apartment",     "T14b", "J26"),
-                ("2016 Owned Outright",        "T18",  "G34"),
-                ("2016 Owned with a mortgage", "T18",  "G35"),
-                ("2016 Rented",                "T18",  "G44"),
-
-                # 2021
-                ("2021 Separate House",        "T14c", "J13"),
-                ("2021 Flat or Apartment",     "T14c", "J26"),
-                ("2021 Owned Outright",        "T18",  "G53"),
-                ("2021 Owned with a mortgage", "T18",  "G54"),
-                ("2021 Rented",                "T18",  "G63"),
-            ]
-
-            for label, sheet, cell in tenure_data:
-                val = get_value(wb, sheet, cell)
-                writer.writerow([label, val])
-            writer.writerow([]) 
-
-            # ---------------------------------------------------------
-            # SECTION 4: LABOUR FORCE STATUS (NEW)
-            # ---------------------------------------------------------
-            writer.writerow(["--- Labour Force Status ---"])
-            writer.writerow(["Description", "Value"])
-
-            labour_data = [
-                # 2011
-                ("2011 Employed Worked Full Time",   "T29", "D15"),
-                ("2011 % Unemployment",              "T29", "D23"),
-                ("2011 Labour Force Participation",  "T29", "D24"),
+                # Tenure Types
+                ("Separate House",               ('T14a','J13'),  ('T14b','J13'),  ('T14c','J13')),
+                ("Flat or Apartment",            ('T14a','J26'),  ('T14b','J26'),  ('T14c','J26')),
+                ("Owned Outright",               ('T18', 'G15'),  ('T18', 'G34'),  ('T18', 'G53')),
+                ("Owned with a Mortgage",        ('T18', 'G16'),  ('T18', 'G35'),  ('T18', 'G54')),
+                ("Rented",                       ('T18', 'G25'),  ('T18', 'G44'),  ('T18', 'G63')),
                 
-                # 2016
-                ("2016 Employed Worked Full Time",   "T29", "H15"),
-                ("2016 % Unemployment",              "T29", "H23"),
-                ("2016 Labour Force Participation",  "T29", "H24"),
-
-                # 2021
-                ("2021 Employed Worked Full Time",   "T29", "L15"),
-                ("2021 % Unemployment",              "T29", "L23"),
-                ("2021 Labour Force Participation",  "T29", "L24"),
+                # Labour Force
+                ("Employed Worked Full Time",    ('T29', 'D15'),  ('T29', 'H15'),  ('T29', 'L15')),
+                ("Unemployment %",               ('T29', 'D23'),  ('T29', 'H23'),  ('T29', 'L23')),
+                ("Labour Force Participation",   ('T29', 'D24'),  ('T29', 'H24'),  ('T29', 'L24')),
             ]
 
-            for label, sheet, cell in labour_data:
-                val = get_value(wb, sheet, cell)
-                writer.writerow([label, val])
-            writer.writerow([]) 
+            for metric, (s11, c11), (s16, c16), (s21, c21) in time_series_items:
+                val11 = get_value(wb, s11, c11)
+                val16 = get_value(wb, s16, c16)
+                val21 = get_value(wb, s21, c21)
+
+                growth_11_16 = calc_growth(val16, val11)
+                growth_16_21 = calc_growth(val21, val16)
+                
+                # NEW CALCULATION: Total Growth (2021 vs 2011)
+                growth_11_21 = calc_growth(val21, val11)
+
+                writer.writerow([metric, val11, val16, val21, growth_11_16, growth_16_21, growth_11_21])
+            
+            writer.writerow([]) # Spacer
 
             # ---------------------------------------------------------
-            # SECTION 5: T24 MATRIX & ANALYSIS (A55:N71)
+            # SECTION 3: T24 MATRIX & ANALYSIS (A55:N71)
             # ---------------------------------------------------------
             if 'T24' in wb.sheetnames:
                 writer.writerow(["--- DATA FROM T24 (Matrix A55:N71) ---"])
                 sheet = wb['T24']
                 
-                # 1. Fetch the raw rows specified (A55:N71)
                 raw_rows_extracted = []
                 for row in sheet.iter_rows(min_row=55, max_row=71, min_col=1, max_col=14, values_only=True):
                     clean_row = ["" if cell is None else cell for cell in row]
                     raw_rows_extracted.append(clean_row)
                     writer.writerow(clean_row)
                 
-                print("Extracted T24 data (Rows 55-71).")
+                print("Extracted T24 data.")
                 writer.writerow([]) 
 
-                # 2. PERFORM ANALYSIS (Heatmap & Percentiles)
-                # We need the first 15 rows for the income buckets
+                # ANALYSIS
                 if len(raw_rows_extracted) >= 15:
-                    
-                    # Define Labels
                     rent_labels = [
                         "$1-$74", "$75-$99", "$100-$149", "$150-$199", "$200-$224", 
                         "$225-$274", "$275-$349", "$350-$449", "$450-$549", 
                         "$550-$649", "$650 or more"
                     ]
                     
-                    # Slice the matrix: First 15 rows, Columns B-L (Indices 1-11)
                     analysis_matrix = []
                     income_labels = []
 
                     for i in range(15):
                         row = raw_rows_extracted[i]
-                        income_labels.append(row[0]) # Column A is the label
-                        
-                        # Get columns 1 to 11 (B to L) for the Rent Counts
-                        row_data = row[1:12]
+                        income_labels.append(row[0]) 
+                        row_data = row[1:12] # Cols B-L
                         row_data = [0 if (x == "" or x is None) else x for x in row_data]
                         analysis_matrix.append(row_data)
 
-                    # Run Calculations
                     df_props, df_stats = calculate_rent_stress_stats(analysis_matrix, income_labels, rent_labels)
 
-                    # Write Heatmap
                     if df_props is not None:
                         writer.writerow(["--- T24 Proportion Heatmap (Rent / Income) ---"])
                         writer.writerow(["Income Range"] + list(df_props.columns))
@@ -258,7 +227,6 @@ def export_data_to_csv():
                             writer.writerow([index] + formatted_row)
                         writer.writerow([])
 
-                    # Write Percentiles
                     if df_stats is not None:
                         writer.writerow(["--- T24 Weighted Percentiles (Rent Stress) ---"])
                         writer.writerow(list(df_stats.columns))
@@ -272,7 +240,6 @@ def export_data_to_csv():
                             writer.writerow(formatted_row)
                 else:
                     print("Warning: Not enough rows in T24 range to perform analysis.")
-
             else:
                 print("Warning: Sheet 'T24' not found.")
 
