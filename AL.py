@@ -1,38 +1,34 @@
 import openpyxl
+import os
 
-def get_single_cell_text(file_path, sheet_name, cell_address):
-    """
-    Retrieves data from a single cell and returns it as a text string.
-    """
+def load_data():
+    # 1. Get the directory where THIS script (AL.py) is located
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # 2. Construct the full path to the Excel file
+    # This ensures it works even if you run the script from a different folder
+    filename = 'TSP_305041135.xlsx'
+    file_path = os.path.join(script_dir, filename)
+
+    print(f"Attempting to load: {file_path}")
+
     try:
-        # Load the workbook (data_only=True ensures we get values, not formulas)
-        wb = openpyxl.load_workbook(file_path, data_only=True)
+        # 3. Load the workbook using openpyxl
+        wb = openpyxl.load_workbook(file_path)
         
-        # Access the specific sheet
-        if sheet_name in wb.sheetnames:
-            sheet = wb[sheet_name]
-            
-            # Retrieve the value
-            cell_value = sheet[cell_address].value
-            
-            # Convert to string (handle None if cell is empty)
-            result_text = str(cell_value) if cell_value is not None else ""
-            return result_text
-        else:
-            return f"Error: Sheet '{sheet_name}' not found."
+        # Select the active sheet
+        sheet = wb.active
+        
+        print("Success: Workbook loaded.")
+        
+        # Example: Print the value of the first cell (A1) to verify
+        print(f"Value in A1: {sheet['A1'].value}")
+        
+        return wb
 
     except FileNotFoundError:
-        return f"Error: File '{file_path}' not found."
-    except Exception as e:
-        return f"An error occurred: {e}"
+        print(f"Error: The file '{filename}' was not found in {script_dir}")
+        return None
 
-# --- Configuration ---
-file_name = 'TSP_305041135.xlsx'
-target_sheet = 'T01'  #sheet
-target_cell = 'B17'   #Cell
-
-# --- Execution ---
-cell_data = get_single_cell_text(file_name, target_sheet, target_cell)
-
-# --- Output ---
-print(f"Data from {target_sheet}!{target_cell}: {cell_data}")
+if __name__ == "__main__":
+    load_data()
