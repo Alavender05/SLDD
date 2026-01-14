@@ -178,13 +178,41 @@ def export_data_to_csv():
             writer.writerow([]) 
 
             # ---------------------------------------------------------
-            # SECTION 4: T24 MATRIX & ANALYSIS (A55:N71)
+            # SECTION 4: LABOUR FORCE STATUS (NEW)
+            # ---------------------------------------------------------
+            writer.writerow(["--- Labour Force Status ---"])
+            writer.writerow(["Description", "Value"])
+
+            labour_data = [
+                # 2011
+                ("2011 Employed Worked Full Time",   "T29", "D15"),
+                ("2011 % Unemployment",              "T29", "D23"),
+                ("2011 Labour Force Participation",  "T29", "D24"),
+                
+                # 2016
+                ("2016 Employed Worked Full Time",   "T29", "H15"),
+                ("2016 % Unemployment",              "T29", "H23"),
+                ("2016 Labour Force Participation",  "T29", "H24"),
+
+                # 2021
+                ("2021 Employed Worked Full Time",   "T29", "L15"),
+                ("2021 % Unemployment",              "T29", "L23"),
+                ("2021 Labour Force Participation",  "T29", "L24"),
+            ]
+
+            for label, sheet, cell in labour_data:
+                val = get_value(wb, sheet, cell)
+                writer.writerow([label, val])
+            writer.writerow([]) 
+
+            # ---------------------------------------------------------
+            # SECTION 5: T24 MATRIX & ANALYSIS (A55:N71)
             # ---------------------------------------------------------
             if 'T24' in wb.sheetnames:
                 writer.writerow(["--- DATA FROM T24 (Matrix A55:N71) ---"])
                 sheet = wb['T24']
                 
-                # 1. Fetch the raw rows specified by the user (A55:N71)
+                # 1. Fetch the raw rows specified (A55:N71)
                 raw_rows_extracted = []
                 for row in sheet.iter_rows(min_row=55, max_row=71, min_col=1, max_col=14, values_only=True):
                     clean_row = ["" if cell is None else cell for cell in row]
@@ -195,8 +223,7 @@ def export_data_to_csv():
                 writer.writerow([]) 
 
                 # 2. PERFORM ANALYSIS (Heatmap & Percentiles)
-                # We need the first 15 rows of the extracted block for the income buckets
-                # (Negative/Nil up to $4,000 or more)
+                # We need the first 15 rows for the income buckets
                 if len(raw_rows_extracted) >= 15:
                     
                     # Define Labels
@@ -215,7 +242,6 @@ def export_data_to_csv():
                         income_labels.append(row[0]) # Column A is the label
                         
                         # Get columns 1 to 11 (B to L) for the Rent Counts
-                        # Handle potential empty strings/None
                         row_data = row[1:12]
                         row_data = [0 if (x == "" or x is None) else x for x in row_data]
                         analysis_matrix.append(row_data)
