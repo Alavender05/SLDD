@@ -1,7 +1,8 @@
 import openpyxl
+from openpyxl.styles import Font
+from openpyxl.formatting.rule import ColorScaleRule
+from openpyxl.utils import get_column_letter
 import os
-import csv
-import pandas as pd
 import numpy as np
 
 # ==========================================
@@ -16,239 +17,192 @@ def get_value(wb, sheet_name, cell_ref):
 
 def clean_val(val):
     """Converts Excel value to float, handling None and strings."""
-    if val is None:
+    if val is None or val == "":
         return 0.0
-    if isinstance(val, (int, float)):
+    if isinstance(val, (int, float, np.integer, np.floating)):
         return float(val)
     try:
-        # Remove common currency/percentage symbols
-        clean_str = str(val).replace('$', '').replace(',', '').replace('%', '').strip()
+        clean_str = str(val).replace("$", "").replace(",", "").replace("%", "").strip()
         return float(clean_str)
-    except ValueError:
+    except (ValueError, TypeError):
         return 0.0
 
 def calc_growth(current, previous):
-    """Calculates percentage growth between two values."""
+    """Calculates percentage growth between two values. Returns formatted string."""
     prev_float = clean_val(previous)
     curr_float = clean_val(current)
     
     if prev_float == 0:
-        return "N/A" # Avoid division by zero
+        return "N/A"
     
     growth = (curr_float - prev_float) / prev_float
     return f"{growth:.2%}"
 
-def get_midpoint(label):
-    """Calculates the numerical midpoint of a range string."""
-    if not isinstance(label, str):
-        return 0
-    clean = label.replace('$', '').replace(',', '').strip()
+def style_output_sheet(ws):
+    """Auto-adjust column widths and bold headers."""
+    for row in ws.iter_rows():
+        for cell in row:
+            if cell.value and str(cell.value).startswith("---"):
+                cell.font = Font(bold=True)
+            if cell.value in ["Metric", "Income Range", "Description", "Year"]:
+                cell.font = Font(bold=True)
+                
+    for col in ws.columns:
+        max_length = 0
+        column = col[0].column_letter
+        for cell in col:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(str(cell.value))
+            except:
+                pass
+        ws.column_dimensions[column].width = (max_length + 2)
+
+def add_conditional_formatting(ws, start_row, end_row, start_col_idx, end_col_idx):
+    """Applies a 2-Color Scale (White -> Red) to the specified range."""
+    start_col_char = get_column_letter(start_col_idx)
+    end_col_char = get_column_letter(end_col_idx)
+    cell_range = f"{start_col_char}{start_row}:{end_col_char}{end_row}"
     
-    if "Negative" in clean or "Nil" in clean:
-        return 0
-    elif "or more" in clean:
-        try:
-            lower = float(clean.replace(' or more', ''))
-            return lower * 1.1 
-        except ValueError:
-            return 0
-    elif "-" in clean:
-        try:
-            low, high = map(float, clean.split('-'))
-            return (low + high) / 2
-        except ValueError:
-            return 0
-    return 0
-
-def calculate_rent_stress_stats(raw_data_rows, income_labels, rent_labels):
-    """Performs the matrix math: Proportions -> Weighted Percentiles."""
-    try:
-        df_counts = pd.DataFrame(raw_data_rows, index=income_labels, columns=rent_labels)
-        df_counts = df_counts.apply(pd.to_numeric, errors='coerce').fillna(0)
-
-        income_mids = [get_midpoint(l) for l in income_labels]
-        rent_mids = [get_midpoint(l) for l in rent_labels]
-
-        proportion_matrix = np.zeros(df_counts.shape)
-        for r in range(len(income_labels)):
-            for c in range(len(rent_labels)):
-                inc = income_mids[r]
-                rent = rent_mids[c]
-                if inc > 0:
-                    proportion_matrix[r, c] = (rent / inc)
-                else:
-                    proportion_matrix[r, c] = np.nan
-
-        df_proportions = pd.DataFrame(proportion_matrix, index=income_labels, columns=rent_labels)
-
-        percentiles_data = []
-        for c, col_name in enumerate(rent_labels):
-            counts = df_counts.iloc[:, c].values
-            ratios = df_proportions.iloc[:, c].values
-            
-            mask = (counts > 0) & (~np.isnan(ratios))
-            valid_counts = counts[mask]
-            valid_ratios = ratios[mask]
-            
-            if len(valid_counts) == 0:
-                percentiles_data.append([col_name, np.nan, np.nan, np.nan])
-                continue
-            
-            expanded_ratios = np.repeat(valid_ratios, valid_counts.astype(int))
-            
-            p25 = np.percentile(expanded_ratios, 25)
-            p50 = np.percentile(expanded_ratios, 50)
-            p75 = np.percentile(expanded_ratios, 75)
-            
-            percentiles_data.append([col_name, p25, p50, p75])
-
-        df_percentiles = pd.DataFrame(
-            percentiles_data, 
-            columns=['Rent Range', '25th Percentile', 'Median', '75th Percentile']
-        )
-        return df_proportions, df_percentiles
-
-    except Exception as e:
-        print(f"Error in calculation: {e}")
-        return None, None
+    rule = ColorScaleRule(
+        start_type='min', start_color='FFFFFF',
+        end_type='max', end_color='FF0000'
+    )
+    ws.conditional_formatting.add(cell_range, rule)
 
 # ==========================================
 # 2. MAIN EXPORT FUNCTION
 # ==========================================
 
-def export_data_to_csv():
+def export_data_to_excel():
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    excel_filename = 'TSP_305041135.xlsx'
-    csv_filename = 'extracted_data.csv'
-    
-    excel_path = os.path.join(script_dir, excel_filename)
-    csv_path = os.path.join(script_dir, csv_filename)
+    input_filename = "TSP_305041135.xlsx"
+    output_filename = "extracted_data.xlsx"
 
-    print(f"Reading from: {excel_filename}")
-    print(f"Writing to:   {csv_filename}\n")
+    input_path = os.path.join(script_dir, input_filename)
+    output_path = os.path.join(script_dir, output_filename)
+
+    print(f"Reading from: {input_filename}")
+    print(f"Writing to:   {output_filename}\n")
 
     try:
-        wb = openpyxl.load_workbook(excel_path, data_only=True)
-        
-        with open(csv_path, mode='w', newline='') as f:
-            writer = csv.writer(f)
+        wb_source = openpyxl.load_workbook(input_path, data_only=True)
+        wb_out = openpyxl.Workbook()
+        ws_out = wb_out.active
+        ws_out.title = "Summary Report"
 
-            # ---------------------------------------------------------
-            # SECTION 1: T02 MATRIX
-            # ---------------------------------------------------------
-            if 'T02' in wb.sheetnames:
-                writer.writerow(["--- DATA FROM T02 (Matrix A12:I21) ---"])
-                sheet = wb['T02']
-                for row in sheet.iter_rows(min_row=12, max_row=21, min_col=1, max_col=9, values_only=True):
-                    writer.writerow(["" if cell is None else cell for cell in row])
-                writer.writerow([]) 
-
-            # ---------------------------------------------------------
-            # SECTION 2: TIME SERIES PANELS (Divorced, Tenure, Labour)
-            # ---------------------------------------------------------
-            writer.writerow(["--- Time Series Analysis (Growth Rates) ---"])
+        # --- SECTION 1: T02 ---
+        if "T02" in wb_source.sheetnames:
+            sheet = wb_source["T02"]
+            ws_out.append(["--- T02 MEDIAN / AVERAGE METRICS ---"])
+            ws_out.append(["Metric", "2011", "2016", "2021"])
             
-            # UPDATED HEADER: Added "Total Growth '11-'21"
-            writer.writerow(["Metric", "2011 Value", "2016 Value", "2021 Value", "Growth '11-'16", "Growth '16-'21", "Total Growth '11-'21"])
+            metric_rows = [15, 17, 19, 21, 23]
+            t02_metrics = []
+            
+            # Left side
+            for r in metric_rows:
+                name = sheet[f"A{r}"].value
+                v11 = sheet[f"B{r}"].value
+                v16 = sheet[f"C{r}"].value
+                v21 = sheet[f"D{r}"].value
+                if name: t02_metrics.append([name, v11, v16, v21])
+            
+            # Right side
+            for r in metric_rows:
+                name = sheet[f"F{r}"].value
+                v11 = sheet[f"G{r}"].value
+                v16 = sheet[f"H{r}"].value
+                v21 = sheet[f"I{r}"].value
+                if name: t02_metrics.append([name, v11, v16, v21])
+                
+            for row in t02_metrics: ws_out.append(row)
 
-            time_series_items = [
-                # Divorced
-                ("Total Persons Divorced",       ('T04', 'L28'),  ('T04', 'L48'),  ('T04', 'L68')),
-                
-                # Tenure Types
-                ("Separate House",               ('T14a','J13'),  ('T14b','J13'),  ('T14c','J13')),
-                ("Flat or Apartment",            ('T14a','J26'),  ('T14b','J26'),  ('T14c','J26')),
-                ("Owned Outright",               ('T18', 'G15'),  ('T18', 'G34'),  ('T18', 'G53')),
-                ("Owned with a Mortgage",        ('T18', 'G16'),  ('T18', 'G35'),  ('T18', 'G54')),
-                ("Rented",                       ('T18', 'G25'),  ('T18', 'G44'),  ('T18', 'G63')),
-                
-                # Labour Force
-                ("Employed Worked Full Time",    ('T29', 'D15'),  ('T29', 'H15'),  ('T29', 'L15')),
-                ("Unemployment %",               ('T29', 'D23'),  ('T29', 'H23'),  ('T29', 'L23')),
-                ("Labour Force Participation",   ('T29', 'D24'),  ('T29', 'H24'),  ('T29', 'L24')),
+        ws_out.append([])
+        ws_out.append([]) 
+
+        # --- SECTION 2: SUMMARY TABLE (With Growth Rates) ---
+        ws_out.append(["--- SUMMARY (2011 / 2016 / 2021) ---"])
+        
+        # UPDATED HEADERS
+        ws_out.append(["Metric", "2011", "2016", "2021", "Growth '11-'16", "Growth '16-'21", "Total Growth '11-'21"])
+
+        summary_items = [
+            ("Total Persons Divorced",       ("T04", "L28"),  ("T04", "L48"),  ("T04", "L68")),
+            ("Separate House",               ("T14a", "J13"), ("T14b", "J13"), ("T14c", "J13")),
+            ("Flat or Apartment",            ("T14a", "J26"), ("T14b", "J26"), ("T14c", "J26")),
+            ("Owned Outright",               ("T18", "G15"),  ("T18", "G34"),  ("T18", "G53")),
+            ("Owned with a Mortgage",        ("T18", "G16"),  ("T18", "G35"),  ("T18", "G54")),
+            ("Rented",                       ("T18", "G25"),  ("T18", "G44"),  ("T18", "G63")),
+            ("Employed Worked Full Time",    ("T29", "D15"),  ("T29", "H15"),  ("T29", "L15")),
+            ("Unemployment %",               ("T29", "D23"),  ("T29", "H23"),  ("T29", "L23")),
+            ("Labour Force Participation",   ("T29", "D24"),  ("T29", "H24"),  ("T29", "L24")),
+        ]
+
+        for metric, (s11, c11), (s16, c16), (s21, c21) in summary_items:
+            v11 = get_value(wb_source, s11, c11)
+            v16 = get_value(wb_source, s16, c16)
+            v21 = get_value(wb_source, s21, c21)
+            
+            # CALCULATE GROWTH RATES
+            g_11_16 = calc_growth(v16, v11)
+            g_16_21 = calc_growth(v21, v16)
+            g_11_21 = calc_growth(v21, v11)
+
+            ws_out.append([metric, v11, v16, v21, g_11_16, g_16_21, g_11_21])
+
+        ws_out.append([])
+        ws_out.append([]) 
+
+        # --- SECTION 3: T24 MATRIX (With Heatmap) ---
+        if "T24" in wb_source.sheetnames:
+            sheet = wb_source["T24"]
+
+            rent_labels = [
+                "$1-$74", "$75-$99", "$100-$149", "$150-$199", "$200-$224",
+                "$225-$274", "$275-$349", "$350-$449", "$450-$549",
+                "$550-$649", "$650 or more"
             ]
 
-            for metric, (s11, c11), (s16, c16), (s21, c21) in time_series_items:
-                val11 = get_value(wb, s11, c11)
-                val16 = get_value(wb, s16, c16)
-                val21 = get_value(wb, s21, c21)
+            ws_out.append(["--- DATA FROM T24 (Income x Rent Matrix) ---"])
+            ws_out.append(["Income Range"] + rent_labels)
 
-                growth_11_16 = calc_growth(val16, val11)
-                growth_16_21 = calc_growth(val21, val16)
-                
-                # NEW CALCULATION: Total Growth (2021 vs 2011)
-                growth_11_21 = calc_growth(val21, val11)
-
-                writer.writerow([metric, val11, val16, val21, growth_11_16, growth_16_21, growth_11_21])
+            data_start_row = ws_out.max_row + 1 
             
-            writer.writerow([]) # Spacer
+            raw_rows = []
+            for row in sheet.iter_rows(min_row=55, max_row=71, min_col=1, max_col=14, values_only=True):
+                income_label = "" if row[0] is None else str(row[0]).strip()
+                if income_label.upper().replace(" ", "") in ("2021CENSUS", "2021CENSUSYEAR", "CENSUSYEAR") or income_label == "":
+                    continue
 
-            # ---------------------------------------------------------
-            # SECTION 3: T24 MATRIX & ANALYSIS (A55:N71)
-            # ---------------------------------------------------------
-            if 'T24' in wb.sheetnames:
-                writer.writerow(["--- DATA FROM T24 (Matrix A55:N71) ---"])
-                sheet = wb['T24']
-                
-                raw_rows_extracted = []
-                for row in sheet.iter_rows(min_row=55, max_row=71, min_col=1, max_col=14, values_only=True):
-                    clean_row = ["" if cell is None else cell for cell in row]
-                    raw_rows_extracted.append(clean_row)
-                    writer.writerow(clean_row)
-                
-                print("Extracted T24 data.")
-                writer.writerow([]) 
+                rent_vals = row[1:12]  # B-L
+                clean_row = [income_label] + [0 if v in (None, "") else v for v in rent_vals]
+                raw_rows.append(clean_row)
+                ws_out.append(clean_row)
 
-                # ANALYSIS
-                if len(raw_rows_extracted) >= 15:
-                    rent_labels = [
-                        "$1-$74", "$75-$99", "$100-$149", "$150-$199", "$200-$224", 
-                        "$225-$274", "$275-$349", "$350-$449", "$450-$549", 
-                        "$550-$649", "$650 or more"
-                    ]
-                    
-                    analysis_matrix = []
-                    income_labels = []
+            if raw_rows:
+                numeric_matrix = [[clean_val(v) for v in r[1:]] for r in raw_rows]
+                col_totals = np.sum(np.array(numeric_matrix, dtype=float), axis=0)
+                totals_row = ["TOTAL"] + [int(x) if float(x).is_integer() else float(x) for x in col_totals]
+                ws_out.append(totals_row)
 
-                    for i in range(15):
-                        row = raw_rows_extracted[i]
-                        income_labels.append(row[0]) 
-                        row_data = row[1:12] # Cols B-L
-                        row_data = [0 if (x == "" or x is None) else x for x in row_data]
-                        analysis_matrix.append(row_data)
+            # Apply Heatmap
+            data_end_row = data_start_row + len(raw_rows) - 1
+            if len(raw_rows) > 0:
+                print(f"Applying Heatmap to Rows {data_start_row}-{data_end_row}")
+                add_conditional_formatting(ws_out, data_start_row, data_end_row, 2, 12)
 
-                    df_props, df_stats = calculate_rent_stress_stats(analysis_matrix, income_labels, rent_labels)
+            print("Extracted T24 data with Heatmap.")
 
-                    if df_props is not None:
-                        writer.writerow(["--- T24 Proportion Heatmap (Rent / Income) ---"])
-                        writer.writerow(["Income Range"] + list(df_props.columns))
-                        for index, row in df_props.iterrows():
-                            formatted_row = [f"{x:.2%}" if not np.isnan(x) else "N/A" for x in row]
-                            writer.writerow([index] + formatted_row)
-                        writer.writerow([])
+        else:
+            print("Warning: Sheet 'T24' not found.")
 
-                    if df_stats is not None:
-                        writer.writerow(["--- T24 Weighted Percentiles (Rent Stress) ---"])
-                        writer.writerow(list(df_stats.columns))
-                        for index, row in df_stats.iterrows():
-                            formatted_row = []
-                            for x in row:
-                                if isinstance(x, (int, float)):
-                                    formatted_row.append(f"{x:.2%}")
-                                else:
-                                    formatted_row.append(x)
-                            writer.writerow(formatted_row)
-                else:
-                    print("Warning: Not enough rows in T24 range to perform analysis.")
-            else:
-                print("Warning: Sheet 'T24' not found.")
+        style_output_sheet(ws_out)
+        wb_out.save(output_path)
+        print(f"\nSuccess! Open '{output_filename}' to see the report with growth rates.")
 
-        print(f"\nSuccess! Open '{csv_filename}' to see the updated report.")
-
-    except FileNotFoundError:
-        print(f"Error: The file '{excel_filename}' was not found.")
     except Exception as e:
         print(f"An error occurred: {e}")
 
 if __name__ == "__main__":
-    export_data_to_csv()
+    export_data_to_excel()
