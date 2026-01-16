@@ -142,7 +142,12 @@ def write_tsp_analysis_to_sheet(wb, uploaded_file):
     ]
     for metric, s11, s16, s21 in summary_items:
         v11, v16, v21 = get_value(wb_source, *s11), get_value(wb_source, *s16), get_value(wb_source, *s21)
-        ws_out.append([metric, v11, v16, v21, calc_growth(v16, v11), calc_growth(v21, v16), calc_growth(v21, v11)])
+        # Convert to numbers, coerce text to float
+        v11_num = clean_val(v11)
+        v16_num = clean_val(v16)
+        v21_num = clean_val(v21)
+        ws_out.append([metric, v11_num, v16_num, v21_num, calc_growth(v16, v11), calc_growth(v21, v16), calc_growth(v21, v11)])
+
     ws_out.append([])
     ws_out.append([])
 
@@ -276,8 +281,7 @@ def write_scraped_data_to_sheet(wb, data_dict):
             row.append(val if val else "—")
         ws.append(row)
 
-    # --- POST-PROCESS: Convert % metrics to numeric 0–1, apply % format,
-    #                   and right-align all QuickStats values ---
+    # --- POST-PROCESS: Convert all numeric data to float, apply % format and right-align ---
     for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
         unit = row[1].value  # col B
 
@@ -285,18 +289,26 @@ def write_scraped_data_to_sheet(wb, data_dict):
         for cell in row[3:6]:        # cols D, E, F
             cell.alignment = Alignment(horizontal="right")
 
-        # For % metrics, convert to 0–1 and apply % number format
-        if unit == "%":
-            for cell in row[3:6]:
-                val = cell.value
-                if val in (None, "—", ""):
-                    continue
-                try:
-                    num = float(str(val).replace("%", "").replace(",", "").strip())
+        # For all metrics, convert year values (D, E, F) to numeric
+        for cell in row[3:6]:
+            val = cell.value
+            if val in (None, "—", ""):
+                continue
+            try:
+                # Strip currency, commas, %
+                clean_str = str(val).replace("%", "").replace(",", "").replace("$", "").strip()
+                num = float(clean_str)
+                
+                # If unit is %, convert to 0–1 decimal and apply % format
+                if unit == "%":
                     cell.value = num / 100.0
                     cell.number_format = "0.0%"
-                except (ValueError, TypeError):
-                    pass
+                else:
+                    # Otherwise store as-is (number)
+                    cell.value = num
+            except (ValueError, TypeError):
+                # leave as-is if not parseable
+                pass
 
     ws.column_dimensions["A"].width = 50
     for col in ["D", "E", "F"]: 
