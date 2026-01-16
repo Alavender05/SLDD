@@ -10,9 +10,11 @@ import requests
 from bs4 import BeautifulSoup
 import re
 
+
 # ==========================================
 # 1. SHARED EXCEL STYLES & HELPERS
 # ==========================================
+
 
 def get_header_style():
     return {
@@ -21,6 +23,7 @@ def get_header_style():
         "border": Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin')),
         "alignment": Alignment(horizontal="center", vertical="center", wrap_text=True)
     }
+
 
 def style_sheet_columns(ws):
     """Auto-adjust column widths."""
@@ -35,14 +38,17 @@ def style_sheet_columns(ws):
                 pass
         ws.column_dimensions[column].width = (max_length + 2)
 
+
 # ==========================================
-# 2. TSP ANALYSIS LOGIC (FROM UPLOAD)
+# 2. TSP ANALYSIS LOGIC (FROM UPLOAD OR DOWNLOAD)
 # ==========================================
+
 
 def get_value(wb, sheet_name, cell_ref):
     if sheet_name in wb.sheetnames:
         return wb[sheet_name][cell_ref].value
     return None
+
 
 def clean_val(val):
     if val is None or val == "":
@@ -55,6 +61,7 @@ def clean_val(val):
     except (ValueError, TypeError):
         return 0.0
 
+
 def calc_growth(current, previous):
     prev_float = clean_val(previous)
     curr_float = clean_val(current)
@@ -63,25 +70,33 @@ def calc_growth(current, previous):
     growth = (curr_float - prev_float) / prev_float
     return f"{growth:.2%}"
 
+
 def get_midpoint(label):
-    if not isinstance(label, str): return 0
+    if not isinstance(label, str): 
+        return 0
     clean = label.replace('$', '').replace(',', '').strip()
-    if "Negative" in clean or "Nil" in clean: return 0
+    if "Negative" in clean or "Nil" in clean: 
+        return 0
     elif "or more" in clean:
-        try: return float(clean.replace(' or more', '')) * 1.1
-        except: return 0
+        try: 
+            return float(clean.replace(' or more', '')) * 1.1
+        except: 
+            return 0
     elif "-" in clean:
         try:
             low, high = map(float, clean.split('-'))
             return (low + high) / 2
-        except: return 0
+        except: 
+            return 0
     return 0
+
 
 def add_conditional_formatting(ws, start_row, end_row, start_col_idx, end_col_idx):
     start_col = get_column_letter(start_col_idx)
     end_col = get_column_letter(end_col_idx)
     cell_range = f"{start_col}{start_row}:{end_col}{end_row}"
     ws.conditional_formatting.add(cell_range, ColorScaleRule(start_type='min', start_color='FFFFFF', end_type='max', end_color='FF0000'))
+
 
 def write_tsp_analysis_to_sheet(wb, uploaded_file):
     """Reads uploaded file and adds a 'TSP Analysis' sheet to the wb."""
@@ -95,19 +110,24 @@ def write_tsp_analysis_to_sheet(wb, uploaded_file):
         ws_out.append(["Metric", "2011", "2016", "2021"])
         
         # Apply Header Style
-        for cell in ws_out[2]: cell.font = Font(bold=True)
+        for cell in ws_out[2]: 
+            cell.font = Font(bold=True)
 
         rows = [15, 17, 19, 21, 23]
         for r in rows:
-            if sheet[f"A{r}"].value: ws_out.append([sheet[f"A{r}"].value, sheet[f"B{r}"].value, sheet[f"C{r}"].value, sheet[f"D{r}"].value])
-            if sheet[f"F{r}"].value: ws_out.append([sheet[f"F{r}"].value, sheet[f"G{r}"].value, sheet[f"H{r}"].value, sheet[f"I{r}"].value])
-        ws_out.append([]); ws_out.append([])
+            if sheet[f"A{r}"].value: 
+                ws_out.append([sheet[f"A{r}"].value, sheet[f"B{r}"].value, sheet[f"C{r}"].value, sheet[f"D{r}"].value])
+            if sheet[f"F{r}"].value: 
+                ws_out.append([sheet[f"F{r}"].value, sheet[f"G{r}"].value, sheet[f"H{r}"].value, sheet[f"I{r}"].value])
+        ws_out.append([])
+        ws_out.append([])
 
     # --- Summary Table ---
     ws_out.append(["--- SUMMARY (2011 / 2016 / 2021) ---"])
     header_row = ["Metric", "2011", "2016", "2021", "Growth '11-'16", "Growth '16-'21", "Total Growth '11-'21"]
     ws_out.append(header_row)
-    for cell in ws_out[ws_out.max_row]: cell.font = Font(bold=True)
+    for cell in ws_out[ws_out.max_row]: 
+        cell.font = Font(bold=True)
 
     summary_items = [
         ("Total Persons Divorced", ("T04", "L28"), ("T04", "L48"), ("T04", "L68")),
@@ -123,7 +143,8 @@ def write_tsp_analysis_to_sheet(wb, uploaded_file):
     for metric, s11, s16, s21 in summary_items:
         v11, v16, v21 = get_value(wb_source, *s11), get_value(wb_source, *s16), get_value(wb_source, *s21)
         ws_out.append([metric, v11, v16, v21, calc_growth(v16, v11), calc_growth(v21, v16), calc_growth(v21, v11)])
-    ws_out.append([]); ws_out.append([])
+    ws_out.append([])
+    ws_out.append([])
 
     # --- T24 Matrix ---
     if "T24" in wb_source.sheetnames:
@@ -131,7 +152,8 @@ def write_tsp_analysis_to_sheet(wb, uploaded_file):
         ws_out.append(["--- DATA FROM T24 (Income x Rent Matrix) ---"])
         rent_labels = ["$1-$74", "$75-$99", "$100-$149", "$150-$199", "$200-$224", "$225-$274", "$275-$349", "$350-$449", "$450-$549", "$550-$649", "$650 or more"]
         ws_out.append(["Income Range"] + rent_labels)
-        for cell in ws_out[ws_out.max_row]: cell.font = Font(bold=True)
+        for cell in ws_out[ws_out.max_row]: 
+            cell.font = Font(bold=True)
         
         start_row = ws_out.max_row + 1
         raw_rows = []
@@ -151,15 +173,18 @@ def write_tsp_analysis_to_sheet(wb, uploaded_file):
 
     style_sheet_columns(ws_out)
 
+
 # ==========================================
 # 3. SCRAPING LOGIC (ONLINE DATA)
 # ==========================================
+
 
 BASE_URLS = {
     2011: "https://www.abs.gov.au/census/find-census-data/quickstats/2011/{}",
     2016: "https://www.abs.gov.au/census/find-census-data/quickstats/2016/{}",
     2021: "https://www.abs.gov.au/census/find-census-data/quickstats/2021/{}",
 }
+
 
 METRICS = [
     {"name": "Average number of people per household", "unit": "", "variants": ["Average number of people per household", "Average people per household"]},
@@ -180,6 +205,7 @@ METRICS = [
     {"name": "Flat, unit or apartment", "unit": "%", "variants": ["Flat or apartment", "Flat, unit or apartment"]},
 ]
 
+
 def get_quickstats_tables(area_code, year):
     url = BASE_URLS[year].format(area_code)
     try:
@@ -193,8 +219,10 @@ def get_quickstats_tables(area_code, year):
     area_name = h1.get_text(strip=True) if h1 else f"Area {area_code}"
     return tables, area_name, url
 
+
 def extract_metric_value(tables, variants):
-    if not tables: return None
+    if not tables: 
+        return None
     lower_variants = [v.lower() for v in variants]
     for table in tables:
         for tr in table.find_all("tr"):
@@ -205,16 +233,19 @@ def extract_metric_value(tables, variants):
                     return cells[2].strip() if len(cells) > 2 else (cells[1].strip() if len(cells) > 1 else None)
     return None
 
+
 def extract_all_metrics(area_code, year):
     tables, area_name, url = get_quickstats_tables(area_code, year)
-    if tables is None: return None
+    if tables is None: 
+        return None
     result = {"area_code": area_code, "area_name": area_name, "year": year, "url": url}
     for m in METRICS:
         result[m["name"]] = extract_metric_value(tables, m["variants"])
     return result
 
+
 def write_scraped_data_to_sheet(wb, data_dict):
-    """Adds a 'Online QuickStats' sheet to the wb."""
+    """Adds a 'Online QuickStats' sheet to the wb with proper % formatting."""
     ws = wb.create_sheet("Online QuickStats")
     
     # Styles
@@ -245,53 +276,128 @@ def write_scraped_data_to_sheet(wb, data_dict):
             row.append(val if val else "—")
         ws.append(row)
 
+    # --- POST-PROCESS: Convert % metrics to numeric 0–1, apply % format,
+    #                   and right-align all QuickStats values ---
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
+        unit = row[1].value  # col B
+
+        # Always right-align the year values (2011, 2016, 2021)
+        for cell in row[3:6]:        # cols D, E, F
+            cell.alignment = Alignment(horizontal="right")
+
+        # For % metrics, convert to 0–1 and apply % number format
+        if unit == "%":
+            for cell in row[3:6]:
+                val = cell.value
+                if val in (None, "—", ""):
+                    continue
+                try:
+                    num = float(str(val).replace("%", "").replace(",", "").strip())
+                    cell.value = num / 100.0
+                    cell.number_format = "0.0%"
+                except (ValueError, TypeError):
+                    pass
+
     ws.column_dimensions["A"].width = 50
-    for col in ["D", "E", "F"]: ws.column_dimensions[col].width = 15
+    for col in ["D", "E", "F"]: 
+        ws.column_dimensions[col].width = 15
+
 
 # ==========================================
-# 4. STREAMLIT APP LOGIC
+# 4. ABS TIME SERIES PROFILE DOWNLOAD
 # ==========================================
+
+
+def download_tsp_for_area(area_code: str, year: int = 2021):
+    """
+    Download the Time Series Profile XLSX for the given area code and year.
+    Returns a BytesIO object or None.
+    """
+    # Normalise and build the direct TSP download URL
+    area_code = area_code.strip()
+    base = "https://www.abs.gov.au"
+    tsp_path = f"/census/find-census-data/community-profiles/{year}/{area_code}/download/TSP_{area_code}.xlsx"
+    tsp_url = base + tsp_path
+
+    try:
+        resp = requests.get(tsp_url, timeout=30)
+        resp.raise_for_status()
+    except Exception as e:
+        st.warning(f"Could not download TSP file from {tsp_url}: {e}")
+        return None
+
+    return io.BytesIO(resp.content)
+
+# ==========================================
+# 5. STREAMLIT APP LOGIC
+# ==========================================
+
 
 def main():
     st.set_page_config(page_title="Census Data Tool", layout="wide", page_icon="📊")
     st.title("📊 Australian Census Data Combiner")
-    st.write("This tool performs two actions and merges them into a single Excel file:")
-    st.markdown("1. **Analyzes an uploaded TSP Excel file** (calculates growth, heatmaps, etc.)")
-    st.markdown("2. **Scrapes Online ABS Data** (fetches summary stats for a given Area Code)")
+    st.write("This tool combines TSP analysis and Online QuickStats into a single Excel report:")
+    st.markdown("1. **Analyzes a Time Series Profile (TSP)** – Upload or auto-download from ABS")
+    st.markdown("2. **Scrapes Online ABS QuickStats** – Fetches summary stats for a given Area Code")
+    st.markdown("✨ Both analyses are merged into one Excel file with separate sheets.")
 
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("1. File Upload")
-        uploaded_file = st.file_uploader("Upload TSP_*.xlsx file", type=["xlsx"])
-    
+        st.subheader("1. Time Series Profile (TSP)")
+        uploaded_file = st.file_uploader("Upload TSP_*.xlsx file", type=["xlsx"], help="Skip if you want to auto-download instead.")
+        
     with col2:
-        st.subheader("2. Online Data")
-        area_code_input = st.text_input("Enter ABS Area Code (e.g. 3GBRI):", help="Leave empty if you only want to process the file.").strip().upper()
+        st.subheader("2. Area Code & Options")
+        area_code_input = st.text_input(
+            "Enter ABS Area Code (e.g. 3GBRI):",
+            help="Required for QuickStats scraping. Leave empty if only uploading TSP file."
+        ).strip().upper()
+        
+        auto_fetch_tsp = st.checkbox(
+            "Auto-download Time Series Profile from ABS",
+            value=False,
+            help="If checked, the app will fetch the TSP XLSX from the ABS Community Profile instead of requiring an upload."
+        )
 
     if st.button("Generate Combined Report", type="primary"):
-        if not uploaded_file and not area_code_input:
-            st.error("Please provide at least a File OR an Area Code.")
+        if not uploaded_file and not (area_code_input and auto_fetch_tsp):
+            st.error("Please provide: (1) An uploaded TSP file OR (2) An Area Code with 'Auto-download' checked for QuickStats.")
             return
 
         # Initialize Output Workbook
         wb_out = openpyxl.Workbook()
-        # Remove default sheet created by openpyxl
         if "Sheet" in wb_out.sheetnames:
             del wb_out["Sheet"]
 
-        # 1. PROCESS FILE
-        if uploaded_file:
-            with st.spinner("Processing uploaded file..."):
-                try:
-                    write_tsp_analysis_to_sheet(wb_out, uploaded_file)
-                    st.success("✅ File Analysis Complete")
-                except Exception as e:
-                    st.error(f"Error processing file: {e}")
+        tsp_workbook_source = None
 
-        # 2. PROCESS SCRAPER
+        # --- STEP 1: GET TSP (upload or download) ---
+        if uploaded_file:
+            tsp_workbook_source = uploaded_file
+            st.success("✅ TSP file provided (upload)")
+        elif area_code_input and auto_fetch_tsp:
+            with st.spinner(f"Downloading Time Series Profile for {area_code_input}..."):
+                tsp_bytes = download_tsp_for_area(area_code_input)
+                if tsp_bytes is None:
+                    st.error(f"Could not download Time Series Profile for {area_code_input}. Check the area code and try again.")
+                else:
+                    tsp_workbook_source = tsp_bytes
+                    st.success(f"✅ Time Series Profile downloaded for {area_code_input}")
+
+        # --- STEP 2: ANALYZE TSP ---
+        if tsp_workbook_source:
+            with st.spinner("Processing TSP workbook..."):
+                try:
+                    write_tsp_analysis_to_sheet(wb_out, tsp_workbook_source)
+                    st.success("✅ TSP Analysis sheet created")
+                except Exception as e:
+                    st.error(f"Error processing TSP workbook: {e}")
+                    return
+
+        # --- STEP 3: SCRAPE QUICKSTATS ---
         if area_code_input:
-            with st.spinner(f"Scraping online data for {area_code_input}..."):
+            with st.spinner(f"Scraping QuickStats for {area_code_input}..."):
                 data_by_year = {}
                 years = [2011, 2016, 2021]
                 progress_bar = st.progress(0)
@@ -306,19 +412,25 @@ def main():
                 
                 if valid_data:
                     write_scraped_data_to_sheet(wb_out, data_by_year)
-                    st.success(f"✅ Online Data Scraped for {area_code_input}")
+                    st.success(f"✅ QuickStats sheet created for {area_code_input}")
                 else:
-                    st.warning(f"Could not find online data for {area_code_input}")
+                    st.warning(f"Could not find QuickStats data for {area_code_input}")
 
-        # 3. SAVE AND DOWNLOAD
+        # --- STEP 4: SAVE AND DOWNLOAD ---
         if len(wb_out.sheetnames) > 0:
             buffer = io.BytesIO()
             wb_out.save(buffer)
             buffer.seek(0)
             
-            file_label = "Combined_Report.xlsx"
-            if uploaded_file and not area_code_input: file_label = "TSP_Analysis_Report.xlsx"
-            if area_code_input and not uploaded_file: file_label = f"{area_code_input}_Census_Data.xlsx"
+            # Generate sensible filename
+            if uploaded_file and area_code_input:
+                file_label = f"{area_code_input}_Combined_Report.xlsx"
+            elif tsp_workbook_source and area_code_input:
+                file_label = f"{area_code_input}_Combined_Report.xlsx"
+            elif area_code_input:
+                file_label = f"{area_code_input}_Census_Data.xlsx"
+            else:
+                file_label = "TSP_Analysis_Report.xlsx"
 
             st.download_button(
                 label="📥 Download Final Excel Report",
@@ -326,8 +438,11 @@ def main():
                 file_name=file_label,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+            
+            st.info(f"Report contains {len(wb_out.sheetnames)} sheet(s): {', '.join(wb_out.sheetnames)}")
         else:
             st.error("No data was generated. Please check your inputs.")
+
 
 if __name__ == "__main__":
     main()
