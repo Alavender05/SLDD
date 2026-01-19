@@ -116,7 +116,7 @@ def write_tsp_analysis_to_sheet(wb, uploaded_file, sheet_name="TSP Analysis"):
     wb_source = openpyxl.load_workbook(uploaded_file, data_only=True)
     ws_out = wb.create_sheet(sheet_name)
 
-    # --- T02 (as originally coded – you are using this mainly for per‑area report) ---
+    # --- T02 (per-area view only) ---
     if "T02" in wb_source.sheetnames:
         sheet = wb_source["T02"]
         ws_out.append(["--- T02 MEDIAN / AVERAGE METRICS ---"])
@@ -148,7 +148,7 @@ def write_tsp_analysis_to_sheet(wb, uploaded_file, sheet_name="TSP Analysis"):
         ws_out.append([])
         ws_out.append([])
 
-    # --- Summary Table (same metrics you listed) ---
+    # --- Summary Table ---
     ws_out.append(["--- SUMMARY (2011 / 2016 / 2021) ---"])
     header_row = [
         "Metric",
@@ -251,12 +251,10 @@ def extract_tsp_summary(uploaded_file):
     """
     Extract summary metrics from TSP file (2011, 2016, 2021 values).
     Uses label lookups in T02/T04/T14/T18/T29 so it is robust to row shifts.
-    Returns dict: {"metric_name": [val_2011, val_2016, val_2021], ...}
     """
     wb_source = openpyxl.load_workbook(uploaded_file, data_only=True)
     summary = {}
 
-    # ---------- helper to find a row in a sheet by label text ----------
     def find_row_by_label(sheet, label, col="A"):
         label_lower = str(label).strip().lower()
         for row in range(1, sheet.max_row + 1):
@@ -267,13 +265,12 @@ def extract_tsp_summary(uploaded_file):
                 return row
         return None
 
-    # ---------- T02 MEDIANS / AVERAGES ----------
+    # T02 medians / averages
     if "T02" in wb_source.sheetnames:
         t02 = wb_source["T02"]
-
         t02_label_map = [
-            ("Median age of persons", "Median age of persons", "left"),  # B/C/D
-            ("Median mortgage repayment ($/monthly)", "Median mortgage repayment ($/monthly)", "right"),  # F/G/H
+            ("Median age of persons", "Median age of persons", "left"),
+            ("Median mortgage repayment ($/monthly)", "Median mortgage repayment ($/monthly)", "right"),
             ("Median total personal income ($/weekly)", "Median total personal income ($/weekly)", "left"),
             ("Median rent ($/weekly)(a)", "Median rent ($/weekly)(a)", "right"),
             ("Median total family income ($/weekly)", "Median total family income ($/weekly)", "left"),
@@ -281,7 +278,6 @@ def extract_tsp_summary(uploaded_file):
             ("Median total household income ($/weekly)", "Median total household income ($/weekly)", "left"),
             ("Average household size", "Average household size", "left"),
         ]
-
         for metric_name, label_text, side in t02_label_map:
             r = find_row_by_label(t02, label_text, col="A" if side == "left" else "F")
             if r is None:
@@ -290,18 +286,19 @@ def extract_tsp_summary(uploaded_file):
             if side == "left":
                 c11, c16, c21 = f"B{r}", f"C{r}", f"D{r}"
             else:
-                c11, c16, c21 = f"G{r}", f"H{r}", f"I{r}"  # F is the label, G/H/I are values
+                c11, c16, c21 = f"G{r}", f"H{r}", f"I{r}"
             v11 = t02[c11].value
             v16 = t02[c16].value
             v21 = t02[c21].value
             summary[metric_name] = [clean_val(v11), clean_val(v16), clean_val(v21)]
 
-    # ---------- OTHER SUMMARY METRICS (counts / rates) ----------
     # T04 – Total Persons Divorced
     if "T04" in wb_source.sheetnames:
         t04 = wb_source["T04"]
+
         def get_t04(cell):
             return clean_val(t04[cell].value)
+
         summary["Total Persons Divorced"] = [
             get_t04("L28"),
             get_t04("L48"),
@@ -362,6 +359,7 @@ def extract_tsp_summary(uploaded_file):
 
     return summary
 
+
 def extract_tsp_t24_matrix(uploaded_file):
     """
     Extract T24 Income x Rent matrix from TSP.
@@ -409,12 +407,11 @@ TOTAL_METRICS = {
     "Employed Worked Full Time",
 }
 
+
 def aggregate_tsp_summaries(all_summaries):
     """
     all_summaries: list of dicts from extract_tsp_summary()
-    Returns dict metric -> [2011, 2016, 2021] where:
-      - AVERAGE_METRICS are averaged across areas
-      - TOTAL_METRICS are summed across areas
+    Returns dict metric -> [2011, 2016, 2021].
     """
     if not all_summaries:
         return {}
@@ -444,14 +441,11 @@ def aggregate_tsp_summaries(all_summaries):
 def aggregate_t24_matrices(all_t24_matrices):
     """
     Sum Income x Rent matrices cell-wise across areas.
-    all_t24_matrices: list of matrices, each matrix is list of rows [label, v1..v11]
-    Returns: summed matrix with same structure.
     """
     if not all_t24_matrices:
         return []
 
     grouped = {}
-
     for matrix in all_t24_matrices:
         for row in matrix:
             label = row[0]
@@ -911,7 +905,7 @@ def main():
 
         tsp_workbook_source = None
 
-        # Single TSP
+        # Single TSP (do not block QuickStats if download fails)
         if uploaded_file:
             tsp_workbook_source = uploaded_file
             st.success("✅ TSP file provided (upload)")
@@ -919,9 +913,11 @@ def main():
             with st.spinner(f"Downloading Time Series Profile for {area_code_input}..."):
                 tsp_bytes = download_tsp_for_area(area_code_input)
                 if tsp_bytes is None:
-                    st.error(
-                        f"Could not download Time Series Profile for {area_code_input}. Check the area code and try again."
+                    st.warning(
+                        f"Could not download Time Series Profile for {area_code_input}. "
+                        "Skipping TSP analysis but QuickStats scraping will still run."
                     )
+                    tsp_workbook_source = None
                 else:
                     tsp_workbook_source = tsp_bytes
                     st.success(f"✅ Time Series Profile downloaded for {area_code_input}")
@@ -934,10 +930,11 @@ def main():
                     )
                     st.success("✅ TSP Analysis sheet created")
                 except Exception as e:
-                    st.error(f"Error processing TSP workbook: {e}")
-                    return
+                    st.warning(
+                        f"Error processing TSP workbook. Skipping TSP analysis but continuing with QuickStats. Details: {e}"
+                    )
 
-        # Single QuickStats
+        # Single QuickStats (always allowed to run if area_code_input is set)
         data_by_year_single = None
         if area_code_input:
             with st.spinner(f"Scraping QuickStats for {area_code_input}..."):
@@ -974,20 +971,24 @@ def main():
             if code == area_code_input:
                 continue
 
+            # TSP download is optional – failures do not block QuickStats
             with st.spinner(f"Downloading and processing TSP for {code}..."):
                 tsp_bytes = download_tsp_for_area(code)
                 if tsp_bytes is None:
-                    st.warning(f"Could not download TSP for {code}")
-                    continue
-
-                try:
-                    summary = extract_tsp_summary(tsp_bytes)
-                    t24 = extract_tsp_t24_matrix(tsp_bytes)
-                    all_tsp_summaries.append(summary)
-                    all_t24_matrices.append(t24)
-                    st.success(f"✅ TSP data extracted for {code}")
-                except Exception as e:
-                    st.warning(f"Error processing TSP for {code}: {e}")
+                    st.warning(
+                        f"Could not download TSP for {code}. Skipping TSP but still running QuickStats."
+                    )
+                else:
+                    try:
+                        summary = extract_tsp_summary(tsp_bytes)
+                        t24 = extract_tsp_t24_matrix(tsp_bytes)
+                        all_tsp_summaries.append(summary)
+                        all_t24_matrices.append(t24)
+                        st.success(f"✅ TSP data extracted for {code}")
+                    except Exception as e:
+                        st.warning(
+                            f"Error processing TSP for {code}. Skipping TSP but continuing with QuickStats. Details: {e}"
+                        )
 
             with st.spinner(f"Scraping QuickStats for {code}..."):
                 data_by_year_extra = {}
@@ -1003,7 +1004,7 @@ def main():
                 else:
                     st.warning(f"No QuickStats data for {code}")
 
-        # Aggregated TSP sheet
+        # Aggregated TSP sheet (only if at least one TSP was available)
         if all_tsp_summaries:
             agg_summary = aggregate_tsp_summaries(all_tsp_summaries)
             agg_t24 = aggregate_t24_matrices(all_t24_matrices)
