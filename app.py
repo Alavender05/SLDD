@@ -648,10 +648,31 @@ def extract_all_metrics(area_code, year):
     tables, area_name, url = get_quickstats_tables(area_code, year)
     if tables is None:
         return None
+    
     result = {"area_code": area_code, "area_name": area_name, "year": year, "url": url}
+    
+    # NEW: Extract total "People" count (first data row of first table)
+    people_count = None
+    if tables:
+        first_table = tables[0]
+        for tr in first_table.find_all("tr"):
+            cells = [c.get_text(strip=True) for c in tr.find_all(["th", "td"])]
+            if len(cells) >= 2 and "people" in cells[0].lower():
+                # Extract number from cells[1] (handles commas, etc.)
+                raw_people = cells[1].replace(",", "").strip()
+                try:
+                    people_count = int(float(raw_people))
+                    break
+                except (ValueError, TypeError):
+                    pass
+    result["People"] = people_count or 0
+    
+    # Your existing metrics (unchanged)
     for m in METRICS:
         result[m["name"]] = extract_metric_value(tables, m["variants"])
+    
     return result
+
 
 
 def write_scraped_data_to_sheet(wb, data_dict, sheet_name="Online QuickStats"):
@@ -707,11 +728,9 @@ def write_scraped_data_to_sheet(wb, data_dict, sheet_name="Online QuickStats"):
     for col in ["D", "E", "F"]:
         ws.column_dimensions[col].width = 15
 
-
 def build_2021_summary_workbook(multi_quickstats_dicts):
     """
-    Create a separate workbook summarising 2021 metrics across all areas.
-    Each column is an area; each row is a metric.
+    Create 2021 summary with People column + weighted averages by population.
     """
     wb_2021 = openpyxl.Workbook()
     ws = wb_2021.active
@@ -719,20 +738,22 @@ def build_2021_summary_workbook(multi_quickstats_dicts):
 
     styles = get_header_style()
 
+    # Extract all 2021 entries with People counts
     area_entries = []
     for d in multi_quickstats_dicts:
         entry = d.get(2021)
-        if entry:
+        if entry and entry.get("People") is not None:
             area_entries.append(entry)
 
     if not area_entries:
         return None
 
-    headers = ["Demographics"]
+    # NEW HEADER: People | Demographics | Area1 | Area2 | ... | Weighted Avg
+    headers = ["People", "Demographics"]
     for e in area_entries:
-        label = f"{e['area_code']} {e['area_name']}"
+        label = f"{e['area_code']} - {e['area_name'][:30]}..." if len(e['area_name']) > 30 else e['area_name']
         headers.append(label)
-    headers.append("Average")
+    headers.append("Weighted Avg")
 
     ws.append(headers)
     for cell in ws[1]:
@@ -741,63 +762,111 @@ def build_2021_summary_workbook(multi_quickstats_dicts):
         cell.alignment = styles["alignment"]
         cell.border = styles["border"]
 
-    for m in METRICS:
+    # ROW 2: Show actual People counts (for verification)
+    people_row = ["Total People"] + [""]  # People | "" (demographic name blank)
+    all_populations = []
+    for e in area_entries:
+        people = e.get("People", 0)
+        people_row.append(people)
+        all_populations.append(people)
+    people_row.append(f"={chr(66)}3")  # Formula: =SUM(C3:Z3) for total pop
+    ws.append(people_row)
+    
+    total_population_cell = f"{get_column_letter(len(headers))}{ws.max_row}"
+    ws[total_population_cell].font = Font(bold=True)
+
+    # Process each metric
+    for metric_idx, m in enumerate(METRICS, start=1):
         name = m["name"]
         unit = m["unit"]
-        row_vals = [name]
-        numeric_vals = []
+        
+        row_vals = [""]  # Column A: blank for metrics (People already shown above)
+        row_vals.append(name)  # Column B: metric name
+        
+        # Extract values and populations for this metric
+        metric_values = []
+        area_populations = []
+        
         for e in area_entries:
-            raw = e.get(name)
-            if raw in (None, "—", ""):
+            raw_val = e.get(name)
+            if raw_val in (None, "—", ""):
+                metric_values.append(0)
+                area_populations.append(0)
                 row_vals.append("")
                 continue
+            
             try:
-                clean_str = (
-                    str(raw)
-                    .replace("%", "")
-                    .replace(",", "")
-                    .replace("$", "")
-                    .strip()
-                )
-                num = float(clean_str)
-                numeric_vals.append(num)
-                if unit == "%":
-                    row_vals.append(num / 100.0)
-                else:
-                    row_vals.append(num)
+                # Clean and convert
+                clean_str = str(raw_val).replace("%", "").replace(",", "").replace("$", "").strip()
+                num_val = float(clean_str)
+                
+                # Store raw numeric value
+                metric_values.append(num_val)
+                area_populations.append(e.get("People", 0) or 0)
+                
+                # Display value (format % properly)
+                display_val = num_val / 100.0 if unit == "%" else num_val
+                row_vals.append(display_val)
+                
             except (ValueError, TypeError):
                 row_vals.append("")
+                metric_values.append(0)
+                area_populations.append(0)
 
-        if numeric_vals:
-            avg_val = sum(numeric_vals) / len(numeric_vals)
+        # CALCULATE WEIGHTED AVERAGE
+        total_pop = sum(all_populations)  # Total population across ALL areas
+        weighted_sum = 0.0
+        valid_weights = 0
+        
+        for val, pop in zip(metric_values, area_populations):
+            if pop > 0:
+                weight = pop / total_pop  # population_i / total_population
+                weighted_sum += val * weight
+                valid_weights += 1
+        
+        if total_pop > 0 and valid_weights > 0:
+            weighted_avg_raw = weighted_sum
+            
+            # Format for display
             if unit == "%":
-                row_vals.append(avg_val / 100.0)
+                weighted_avg_display = weighted_avg_raw / 100.0
+                row_vals.append(weighted_avg_display)
             else:
-                row_vals.append(avg_val)
+                row_vals.append(weighted_avg_raw)
         else:
-            row_vals.append("")
+            row_vals.append("N/A")
 
         ws.append(row_vals)
 
-    for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
-        metric_name = row[0].value
-        unit = None
-        for m in METRICS:
-            if m["name"] == metric_name:
-                unit = m["unit"]
-                break
-        for cell in row[1:]:
-            cell.alignment = Alignment(horizontal="right")
-            if unit == "%":
-                if isinstance(cell.value, (int, float, np.integer, np.floating)):
-                    cell.number_format = "0.0%"
+    # Auto-format columns
+    ws.column_dimensions["A"].width = 12      # People column
+    ws.column_dimensions["B"].width = 50      # Metric names
+    ws.column_dimensions["C"].width = 12      # Total pop formula
+    
+    for col in range(4, ws.max_column):  # Area columns
+        ws.column_dimensions[get_column_letter(col)].width = 20
 
-    ws.column_dimensions["A"].width = 45
-    for col in range(2, ws.max_column + 1):
-        ws.column_dimensions[get_column_letter(col)].width = 16
+    # Format numbers
+    for row in ws.iter_rows(min_row=4, max_row=ws.max_row):  # Metrics rows only
+        metric_name = row[1].value
+        unit = next((m["unit"] for m in METRICS if m["name"] == metric_name), "")
+        
+        for cell_idx in range(3, len(row)-1):  # Area columns only
+            cell = row[cell_idx]
+            if isinstance(cell.value, (int, float)):
+                cell.alignment = Alignment(horizontal="right")
+                if unit == "%":
+                    cell.number_format = "0.0%"
+        
+        # Weighted Avg column
+        avg_cell = row[-1]
+        if isinstance(avg_cell.value, (int, float)):
+            avg_cell.alignment = Alignment(horizontal="right")
+            avg_cell.font = Font(bold=True)
+            if unit == "%":
+                avg_cell.number_format = "0.0%"
 
     return wb_2021
-
 
 # ==========================================
 # 4. ABS TIME SERIES PROFILE DOWNLOAD
